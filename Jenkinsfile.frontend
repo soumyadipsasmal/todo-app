@@ -1,6 +1,7 @@
 // ============================================================
 //  JENKINSFILE — FRONTEND (React)
 //  Todo App | CI/CD Practice Pipeline
+//  Deploy stage removed for local practice
 // ============================================================
 
 pipeline {
@@ -12,12 +13,13 @@ pipeline {
         IMAGE_TAG   = "${BUILD_NUMBER}"
         DOCKER_HUB  = credentials('DOCKER_HUB_CREDS')
         FULL_IMAGE  = "docker.io/${DOCKER_HUB_USR}/${IMAGE_NAME}:${IMAGE_TAG}"
-        DEPLOY_HOST = credentials('DEPLOY_SERVER_IP')
-        DEPLOY_USER = "ubuntu"
     }
 
     stages {
 
+        // -------------------------------------------------------
+        // STAGE 1 — Get code from GitHub
+        // -------------------------------------------------------
         stage('Checkout') {
             steps {
                 checkout scm
@@ -25,59 +27,35 @@ pipeline {
             }
         }
 
+        // -------------------------------------------------------
+        // STAGE 2 — Build Docker image & push to Docker Hub
+        // -------------------------------------------------------
         stage('Docker Build & Push') {
             steps {
                 sh '''
-                    echo "--- Login ---"
+                    echo "--- Login to Docker Hub ---"
                     echo "${DOCKER_HUB_PSW}" | docker login -u "${DOCKER_HUB_USR}" --password-stdin
 
-                    echo "--- Build ---"
+                    echo "--- Build Image ---"
                     docker build -t ${FULL_IMAGE} -t docker.io/${DOCKER_HUB_USR}/${IMAGE_NAME}:latest ./frontend
 
-                    echo "--- Push ---"
+                    echo "--- Push Image ---"
                     docker push ${FULL_IMAGE}
                     docker push docker.io/${DOCKER_HUB_USR}/${IMAGE_NAME}:latest
 
+                    echo "--- Cleanup ---"
                     docker rmi ${FULL_IMAGE} || true
+
+                    echo "Done!"
                 '''
             }
         }
 
-        stage('Deploy') {
-            steps {
-                sshagent(['DEPLOY_SSH_KEY']) {
-                    sh '''
-                        scp -o StrictHostKeyChecking=no docker-compose.yml \
-                            ${DEPLOY_USER}@${DEPLOY_HOST}:/opt/todo-app/docker-compose.yml
-
-                        ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "
-                            cd /opt/todo-app
-                            export FRONTEND_IMAGE=${FULL_IMAGE}
-                            docker compose pull frontend
-                            docker compose up -d --no-deps frontend
-                            docker image prune -f
-                            docker compose ps
-                        "
-                    '''
-                }
-            }
-        }
-
-        stage('Health Check') {
-            steps {
-                sh '''
-                    sleep 10
-                    curl -sf http://${DEPLOY_HOST}:3000 \
-                        && echo "Frontend is UP!" \
-                        || (echo "Frontend is DOWN!" && exit 1)
-                '''
-            }
-        }
     }
 
     post {
-        success { echo "✅ Frontend #${BUILD_NUMBER} deployed!" }
-        failure { echo "❌ Frontend #${BUILD_NUMBER} failed!" }
+        success { echo "✅ Frontend Build #${BUILD_NUMBER} Success!" }
+        failure { echo "❌ Frontend Build #${BUILD_NUMBER} Failed!" }
         always  { cleanWs() }
     }
 }
